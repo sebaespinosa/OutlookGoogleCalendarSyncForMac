@@ -34,6 +34,8 @@ namespace OutlookGoogleCalendarSync.Forms {
             try {
                 lTitle.Text = "A new " + (releaseType == "alpha" ? "alpha " : "") + "release of OGCS is available";
                 lSummary.Text = "Would you like to upgrade to v" + releaseVersion + " now?";
+                Width = 663;
+                Height = 518;
 
                 if (string.IsNullOrEmpty(html)) {
                     String githubReleaseNotes = Program.OgcsWebsite + "/release-notes";
