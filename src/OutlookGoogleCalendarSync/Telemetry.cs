@@ -306,12 +306,14 @@ namespace OutlookGoogleCalendarSync {
                 new System.Threading.Thread(async () => {
                     await requestNews();
                     try {
-                        log.Info((newsStand?.News.Count() ?? 0) + " news item(s) retrieved.");
-                        while (!Forms.Main.Instance.IsHandleCreated)
-                            System.Threading.Thread.Sleep(250);
-                        if (Forms.Main.Instance.Console.IsCleared && !Sync.Engine.Instance.SyncingNow)
-                            this.Distribute();
-
+                        int newsCount = newsStand?.News.Count() ?? 0;
+                        log.Info(newsCount + " news item(s) retrieved.");
+                        if (newsCount > 0) {
+                            while (!(Forms.Main.Instance?.IsHandleCreated ?? false))
+                                System.Threading.Thread.Sleep(250);
+                            if (Forms.Main.Instance.Console.IsCleared && !Sync.Engine.Instance.SyncingNow)
+                                this.Distribute();
+                        }
                     } catch (System.Exception ex) {
                         ex.Analyse();
                     }
