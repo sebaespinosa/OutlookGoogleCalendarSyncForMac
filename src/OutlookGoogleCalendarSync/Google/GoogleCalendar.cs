@@ -1953,7 +1953,6 @@ namespace OutlookGoogleCalendarSync.Google {
         /// </summary>
         /// <param name="oSensitivity">Outlook's current setting</param>
         /// <param name="gVisibility">Google's current setting</param>
-        /// <param name="direction">Direction of sync</param>
         private String getPrivacy(OlSensitivity oSensitivity, String gVisibility) {
             SettingsStore.Calendar profile = Sync.Engine.Calendar.Instance.Profile;
 
@@ -1961,19 +1960,17 @@ namespace OutlookGoogleCalendarSync.Google {
                 return (oSensitivity == OlSensitivity.olNormal) ? "default" : "private";
 
             String overridePrivacy = "public";
-            try {
-                Enum.TryParse(profile.PrivacyLevel,  out OlSensitivity olOverridePrivacy);
-                overridePrivacy = olOverridePrivacy == OlSensitivity.olPrivate ? "private" : "public";
-            } catch (System.Exception ex) {
-                ex.Analyse("Could not convert string '" + profile.PrivacyLevel + "' to OlSensitivity type. Defaulting override to normal.");
-            }
-
+            OlSensitivity olOverridePrivacy = OlSensitivity.olNormal;
+            if (!Enum.TryParse(profile.PrivacyLevel, out olOverridePrivacy))
+                log.Error("Could not convert string '" + profile.PrivacyLevel + "' to OlSensitivity type. Defaulting override to normal.");
+            overridePrivacy = olOverridePrivacy == OlSensitivity.olPrivate ? "private" : "public";
+            
             if (profile.TargetCalendar.Id == Sync.Direction.GoogleToOutlook.Id) { //Privacy enforcement is in other direction
                 if (gVisibility == null)
                     return (oSensitivity == OlSensitivity.olNormal) ? "default" : "private";
-                else if (gVisibility == "private" && oSensitivity != OlSensitivity.olPrivate) {
-                    log.Fine("Source of truth for privacy is already set private and target is NOT - so syncing this back.");
-                    return "default";
+                else if (!profile.CreatedItemsOnly && (oSensitivity != olOverridePrivacy)) {
+                    log.Warn("Outlook privacy override has been manually altered - so syncing this back.");
+                    return (oSensitivity == OlSensitivity.olNormal) ? "default" : "private";
                 } else
                     return gVisibility;
             } else {
@@ -1999,22 +1996,22 @@ namespace OutlookGoogleCalendarSync.Google {
 
             String overrideTransparency = "opaque";
             OlBusyStatus fbStatus = OlBusyStatus.olBusy;
-            try {
-                Enum.TryParse(profile.AvailabilityStatus, out fbStatus);
-                if (fbStatus == OlBusyStatus.olFree)
-                    overrideTransparency = "transparent";
-            } catch (System.Exception ex) {
-                ex.Analyse("Could not convert string '" + profile.AvailabilityStatus + "' to OlBusyStatus type. Defaulting override to busy.");
-            }
+            if (!Enum.TryParse(profile.AvailabilityStatus, out fbStatus))
+                log.Error("Could not convert string '" + profile.AvailabilityStatus + "' to OlBusyStatus type. Defaulting override to busy.");
+            if (fbStatus == OlBusyStatus.olFree)
+                overrideTransparency = "transparent";
 
-                if (profile.TargetCalendar.Id == Sync.Direction.GoogleToOutlook.Id) { //Availability enforcement is in other direction
-                    if (gTransparency == null)
-                        return (oBusyStatus == OlBusyStatus.olFree) ? "transparent" : "opaque";
-                    else
-                        return gTransparency;
-                } else {
-                    if (!profile.CreatedItemsOnly || (profile.CreatedItemsOnly && gTransparency == null))
-                        return overrideTransparency;
+            if (profile.TargetCalendar.Id == Sync.Direction.GoogleToOutlook.Id) { //Availability enforcement is in other direction
+                if (gTransparency == null)
+                    return (oBusyStatus == OlBusyStatus.olFree) ? "transparent" : "opaque";
+                else if (!profile.CreatedItemsOnly && (oBusyStatus != fbStatus)) {
+                    log.Warn("Outlook privacy override has been manually altered - so syncing this back.");
+                    return (oBusyStatus == OlBusyStatus.olFree) ? "transparent" : "opaque";
+                } else
+                    return gTransparency;
+            } else {
+                if (!profile.CreatedItemsOnly || (profile.CreatedItemsOnly && gTransparency == null))
+                    return overrideTransparency;
                 else {
                     if (profile.CreatedItemsOnly) return gTransparency;
                     else return overrideTransparency;
@@ -2036,11 +2033,18 @@ namespace OutlookGoogleCalendarSync.Google {
             OlCategoryColor? categoryColour = null;
             EventColour.Palette overrideColour = this.ColourPalette.ActivePalette[Convert.ToInt16(profile.SetEntriesColourGoogleId)];
 
+            Boolean checkOverrideManuallyAltered = false;
             if (profile.SetEntriesColour) {
                 if (profile.TargetCalendar.Id == Sync.Direction.GoogleToOutlook.Id) { //Colour forced to sync in other direction
                     if (gColour == null) //Creating item
                         return EventColour.Palette.NullPalette;
-                    else return gColour;
+                    else {
+                        if (!profile.CreatedItemsOnly) {
+                            checkOverrideManuallyAltered = true;
+                            overrideColour = this.GetColour(profile.SetEntriesColourName);
+                            getOutlookCategoryColour(aiCategories, ref categoryColour);
+                        } else return gColour;
+                    }
 
                 } else {
                     if (!profile.CreatedItemsOnly || (profile.CreatedItemsOnly && gColour == null))
@@ -2054,14 +2058,59 @@ namespace OutlookGoogleCalendarSync.Google {
                 getOutlookCategoryColour(aiCategories, ref categoryColour);
             }
 
+            EventColour.Palette retVal;
             if (categoryColour == null)
-                return null;
+                retVal = null;
             else if (categoryColour == OlCategoryColor.olCategoryColorNone)
-                return EventColour.Palette.NullPalette;
+                retVal = EventColour.Palette.NullPalette;
             else
-                return GetColour((OlCategoryColor)categoryColour);
+                retVal = GetColour((OlCategoryColor)categoryColour);
+
+            if (!checkOverrideManuallyAltered)
+                return retVal;
+            else {
+                if (retVal != overrideColour) {
+                    log.Warn("Outlook category override has been manually altered - so syncing this back.");
+                    return retVal;
+                } else {
+                    return gColour;
+                }
+            }
         }
 
+
+        /// <summary>
+        /// Get the Google colour from an Outlook category name.
+        /// This is deterministic as category names are unique.
+        /// </summary>
+        /// <param name="categoryColour">The Outlook category name</param>
+        public EventColour.Palette GetColour(String categoryColourName) {
+            EventColour.Palette gColour = null;
+
+            SettingsStore.Calendar profile = Settings.Profile.InPlay();
+            if (profile.ColourMaps.Count > 0) {
+                KeyValuePair<String, String> kvp = profile.ColourMaps.FirstOrDefault(cm => cm.Key == categoryColourName);
+                if (kvp.Key != null) {
+                    gColour = ColourPalette.ActivePalette.FirstOrDefault(ap => ap.Id == kvp.Value);
+                    if (gColour != null) {
+                        log.Debug("Colour mapping used: " + kvp.Key + " => " + kvp.Value + ":" + gColour.Name);
+                        return gColour;
+                    }
+                }
+            }
+            //Algorithmic closest colour matching
+            OlCategoryColor? catColour = Outlook.Calendar.Categories.OutlookColour(categoryColourName);
+            if (catColour == null) return EventColour.Palette.NullPalette;
+            System.Drawing.Color color = Outlook.Categories.Map.RgbColour((OlCategoryColor)catColour);
+            EventColour.Palette closest = ColourPalette.GetClosestColour(color);
+            return (closest.Id == "0") ? EventColour.Palette.NullPalette : closest;
+        }
+
+        /// <summary>
+        /// Get the Google colour from an Outlook category type.
+        /// This is non-deterministic if there are multiple categories with different names.
+        /// </summary>
+        /// <param name="categoryColour">The Outlook category</param>
         public EventColour.Palette GetColour(OlCategoryColor categoryColour) {
             EventColour.Palette gColour = null;
 
